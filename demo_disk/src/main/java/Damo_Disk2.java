@@ -6,6 +6,7 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -16,6 +17,8 @@ import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.streaming.api.functions.co.ProcessJoinFunction;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.util.Collector;
+import utils.Config;
+import utils.KafkaUtil;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -258,6 +261,11 @@ public class Damo_Disk2 {
 
         // 5. 输出结果
         dmpTagsStream.print("DMP Tags");
+
+        // 将数据存储到kafka中
+        KafkaSink<String> kafkaSink2 = KafkaUtil.getKafkaProduct(Config.KAFKA_BOOT_SERVER, Config.KAFKA_TOPIC);
+        SingleOutputStreamOperator<String> dmpTagsStream2 = dmpTagsStream.map((MapFunction<Map<String, String>, String>) JSONObject::toJSONString);
+        dmpTagsStream2.sinkTo(kafkaSink2);
 
         env.execute("Optimized User Tags Processing");
     }
