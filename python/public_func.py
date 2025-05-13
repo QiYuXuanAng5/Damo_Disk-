@@ -175,7 +175,7 @@ def get_java_properties():
     # 从 public_func.py 的目录出发，向上回溯到 stream-common
     prop_path = os.path.join(
         current_dir,
-        "../..", "stream-common", "src", "main", "resources", "filter", "common-config.properties.prod"
+        "python", "filter", "common-config.properties.prod"
     )
     # 标准化路径（处理 "../"）
     prop_path = os.path.normpath(prop_path)
