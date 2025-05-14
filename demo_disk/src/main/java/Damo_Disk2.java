@@ -10,9 +10,13 @@ import func.ProcessFilterRepeatTsDataFunc;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.typeinfo.TypeHint;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 
-import org.apache.flink.connector.kafka.sink.KafkaSink;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -21,14 +25,13 @@ import org.apache.flink.streaming.api.datastream.KeyedStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
+import org.apache.flink.streaming.api.functions.co.CoProcessFunction;
 import org.apache.flink.streaming.api.functions.co.ProcessJoinFunction;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingProcessingTimeWindows;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.util.Collector;
 
-import utils.Config;
 import utils.JdbcUtils;
-import utils.KafkaUtil;
 import utils.KafkaUtils;
 
 import java.sql.Connection;
@@ -306,13 +309,6 @@ public class Damo_Disk2 {
         // 5. 输出结果
         dmpTagsStream.print("DMP Tags");
 
-
-        // 将数据存储到kafka中
-        KafkaSink<String> kafkaSink2 = KafkaUtil.getKafkaProduct(Config.KAFKA_BOOT_SERVER, Config.KAFKA_TOPIC);
-        SingleOutputStreamOperator<String> dmpTagsStream2 = dmpTagsStream.map((MapFunction<Map<String, String>, String>) JSONObject::toJSONString);
-        dmpTagsStream2.sinkTo(kafkaSink2);
-
-
         SingleOutputStreamOperator<String> kafkaPageLogSource = env.fromSource(
                         KafkaUtils.buildKafkaSecureSource(
                                 "cdh01:9092",
@@ -369,8 +365,57 @@ public class Damo_Disk2 {
                 .name("win 2 minutes page count msg");
         //win2MinutesPageLogsDs.print("2 min 分钟窗口");
 
-        // 设备打分模型
-        win2MinutesPageLogsDs.map(new MapDeviceAndSearchMarkModelFunc(dim_base_categories, device_rate_weight_coefficient, search_rate_weight_coefficient))
+        KeyedStream<JSONObject, String> behaviorKeyedStream = win2MinutesPageLogsDs
+                .keyBy(data -> data.getString("uid"));
+
+        KeyedStream<Map<String, String>, String> dmpTagsKeyedStream = dmpTagsStream
+                .keyBy(tags -> tags.get("uid"));
+
+        // 实现CoProcessFunction关联两条流
+        DataStream<JSONObject> joinedStream2 = behaviorKeyedStream
+                .connect(dmpTagsKeyedStream)
+                .process(new CoProcessFunction<JSONObject, Map<String, String>, JSONObject>() {
+
+                    // 使用状态存储用户基础信息
+                    private transient ValueState<Map<String, String>> userTagsState;
+
+                    @Override
+                    public void open(Configuration parameters) {
+                        // 初始化状态描述符
+                        ValueStateDescriptor<Map<String, String>> descriptor =
+                                new ValueStateDescriptor<>("userTagsState", TypeInformation.of(new TypeHint<Map<String, String>>() {}));
+                        userTagsState = getRuntimeContext().getState(descriptor);
+                    }
+
+                    @Override
+                    public void processElement1(JSONObject behavior, Context ctx, Collector<JSONObject> out) throws Exception {
+                        // 处理行为数据：检查是否有对应的用户基础信息
+                        Map<String, String> tags = userTagsState.value();
+
+                        if (tags != null) {
+                            // 合并行为数据和基础信息
+                            JSONObject result = new JSONObject();
+                            result.putAll(behavior);  // 行为数据
+                            result.putAll(tags);      // 基础信息
+                            out.collect(result);
+                        } else {
+                            // 可以输出未关联的数据或记录日志
+                            System.out.println("No user tags found for uid: " + behavior.getString("uid"));
+                        }
+                    }
+
+                    @Override
+                    public void processElement2(Map<String, String> tags, Context ctx, Collector<JSONObject> out) throws Exception {
+                        // 缓存用户基础信息到状态
+                        userTagsState.update(tags);
+
+                        // 注意：这里不直接输出，因为需要等待行为数据到达时才关联
+                    }
+                });
+        //joinedStream2.print("关联后的流");
+
+        // 3. 将关联后的流输入打分模型
+        joinedStream2.map(new MapDeviceAndSearchMarkModelFunc(dim_base_categories, device_rate_weight_coefficient, search_rate_weight_coefficient))
                 .print("打分模型");
 
         env.execute("Optimized User Tags Processing");
