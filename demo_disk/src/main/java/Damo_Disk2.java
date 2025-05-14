@@ -141,6 +141,8 @@ public class Damo_Disk2 {
                     public Map<String, String> map(Tuple2<UserInfo, UserInfoSup> value) {
                         Map<String, String> tags = new HashMap<>();
 
+                        tags.put("uid", String.valueOf(value.f0.getId()));
+
                         // 用户ID
                         tags.put("user_id", String.valueOf(value.f0.getId()));
 
@@ -218,6 +220,7 @@ public class Damo_Disk2 {
                                 System.err.println("Error converting timestamp to date: " + birthdayTimestamp);
                             }
                         }
+                        tags.put("ts", String.valueOf(value.f0.getTsMs()));
 
                         return tags;
                     }
