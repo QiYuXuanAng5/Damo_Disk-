@@ -1,20 +1,19 @@
 package utils;
 
+import java.io.IOException;
+import java.util.Properties;
+
 import com.google.common.base.Strings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.util.Properties;
-
 /**
- * 配置文件工具类
- * time: 2021/8/11 9:48 className: ConfigUtils.java
- *
- * @author han.zhou
- * @version 1.0.0
+ * @Package utils.ConfigUtils2
+ * @Author guo.jia.hui
+ * @Date 2025/5/14 15:23
+ * @description:
  */
-public final class ConfigUtils {
+public final class ConfigUtils2 {
     private static final Logger logger = LoggerFactory.getLogger(ConfigUtils.class);
 
     private static Properties properties;

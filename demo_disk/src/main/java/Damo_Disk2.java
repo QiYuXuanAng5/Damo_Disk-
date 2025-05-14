@@ -1,30 +1,44 @@
+import bean.DimBaseCategory;
 import bean.UserInfo;
 import bean.UserInfoSup;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import func.AggregateUserDataProcessFunction;
+import func.MapDevice;
+import func.MapDeviceAndSearchMarkModelFunc;
+import func.ProcessFilterRepeatTsDataFunc;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.java.tuple.Tuple2;
+
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.datastream.KeyedStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.streaming.api.functions.co.ProcessJoinFunction;
+import org.apache.flink.streaming.api.windowing.assigners.TumblingProcessingTimeWindows;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.util.Collector;
-import utils.Config;
-import utils.KafkaUtil;
 
+import utils.Config;
+import utils.JdbcUtils;
+import utils.KafkaUtil;
+import utils.KafkaUtils;
+
+import java.sql.Connection;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -34,6 +48,33 @@ import java.util.Map;
  * @description:
  */
 public class Damo_Disk2 {
+    private static final List<DimBaseCategory> dim_base_categories;
+
+    private static final Connection connection;
+
+    private static final double device_rate_weight_coefficient = 0.1; // 设备权重系数
+    private static final double search_rate_weight_coefficient = 0.15; // 搜索权重系数
+
+    static {
+        try {
+            connection = JdbcUtils.getMySQLConnection(
+                    "jdbc:mysql://cdh03:3306/flink_realtime",
+                    "root",
+                    "root");
+            String sql = "select b3.id,                          \n" +
+                    "            b3.name as b3name,              \n" +
+                    "            b2.name as b2name,              \n" +
+                    "            b1.name as b1name               \n" +
+                    "     from flink_realtime.base_category3 as b3  \n" +
+                    "     join flink_realtime.base_category2 as b2  \n" +
+                    "     on b3.category2_id = b2.id             \n" +
+                    "     join flink_realtime.base_category1 as b1  \n" +
+                    "     on b2.category1_id = b1.id";
+            dim_base_categories = JdbcUtils.queryList2(connection, sql, DimBaseCategory.class, false);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     public static void main(String[] args) throws Exception {
         // 1. 创建 Flink 执行环境
@@ -265,10 +306,72 @@ public class Damo_Disk2 {
         // 5. 输出结果
         dmpTagsStream.print("DMP Tags");
 
+
         // 将数据存储到kafka中
         KafkaSink<String> kafkaSink2 = KafkaUtil.getKafkaProduct(Config.KAFKA_BOOT_SERVER, Config.KAFKA_TOPIC);
         SingleOutputStreamOperator<String> dmpTagsStream2 = dmpTagsStream.map((MapFunction<Map<String, String>, String>) JSONObject::toJSONString);
         dmpTagsStream2.sinkTo(kafkaSink2);
+
+
+        SingleOutputStreamOperator<String> kafkaPageLogSource = env.fromSource(
+                        KafkaUtils.buildKafkaSecureSource(
+                                "cdh01:9092",
+                                "topic_log",
+                                new Date().toString(),
+                                OffsetsInitializer.earliest()
+                        ),
+                        WatermarkStrategy.<String>forBoundedOutOfOrderness(Duration.ofSeconds(3))
+                                .withTimestampAssigner((event, timestamp) -> {
+                                            JSONObject jsonObject = JSONObject.parseObject(event);
+                                            if (event != null && jsonObject.containsKey("ts_ms")) {
+                                                try {
+                                                    return JSONObject.parseObject(event).getLong("ts_ms");
+                                                } catch (Exception e) {
+                                                    e.printStackTrace();
+                                                    System.err.println("Failed to parse event as JSON or get ts_ms: " + event);
+                                                    return 0L;
+                                                }
+                                            }
+                                            return 0L;
+                                        }
+                                ),
+                        "kafka_page_log_source"
+                ).uid("kafka_page_log_source")
+                .name("kafka_page_log_source");
+
+        SingleOutputStreamOperator<JSONObject> dataPageLogConvertJsonDs = kafkaPageLogSource.map(JSON::parseObject)
+                .uid("convert json page log")
+                .name("convert json page log");
+        //dataPageLogConvertJsonDs.print("dataPageLogConvertJsonDs");
+
+        // 设备信息 + 关键词搜索
+        SingleOutputStreamOperator<JSONObject> logDeviceInfoDs = dataPageLogConvertJsonDs.map(new MapDevice())
+                .uid("get device info & search")
+                .name("get device info & search");
+        //logDeviceInfoDs.print("设备信息 + 关键词搜索");
+
+        //对数据进行逻辑分区
+        SingleOutputStreamOperator<JSONObject> filterNotNullUidLogPageMsg = logDeviceInfoDs.filter(data -> !data.getString("uid").isEmpty());
+        KeyedStream<JSONObject, String> keyedStreamLogPageMsg = filterNotNullUidLogPageMsg.keyBy(data -> data.getString("uid"));
+        //keyedStreamLogPageMsg.print("逻辑分区");
+
+
+        SingleOutputStreamOperator<JSONObject> processStagePageLogDs = keyedStreamLogPageMsg.process(new ProcessFilterRepeatTsDataFunc());
+        //processStagePageLogDs.print("状态去重");
+
+        // 2 min 分钟窗口
+        SingleOutputStreamOperator<JSONObject> win2MinutesPageLogsDs = processStagePageLogDs.keyBy(data -> data.getString("uid"))
+                .process(new AggregateUserDataProcessFunction())
+                .keyBy(data -> data.getString("uid"))
+                .window(TumblingProcessingTimeWindows.of(Time.minutes(2)))
+                .reduce((value1, value2) -> value2)
+                .uid("win 2 minutes page count msg")
+                .name("win 2 minutes page count msg");
+        //win2MinutesPageLogsDs.print("2 min 分钟窗口");
+
+        // 设备打分模型
+        win2MinutesPageLogsDs.map(new MapDeviceAndSearchMarkModelFunc(dim_base_categories, device_rate_weight_coefficient, search_rate_weight_coefficient))
+                .print("打分模型");
 
         env.execute("Optimized User Tags Processing");
     }
