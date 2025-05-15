@@ -82,7 +82,7 @@ public class Damo_Disk2 {
     public static void main(String[] args) throws Exception {
         // 1. 创建 Flink 执行环境
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
+        env.setParallelism(1);
 
         // 2. 配置 KafkaSource
         KafkaSource<String> source = KafkaSource.<String>builder()
@@ -192,6 +192,7 @@ public class Damo_Disk2 {
 
                         // 年龄分组 (根据生日计算)
                         long birthdayTimestamp = value.f0.getBirthday();
+                        // 将生日时间戳转换为LocalDate对象 (LocalDate)，并设置时区为当前时区，提取Date(yyyy-MM-dd)
                         LocalDate birth_day = Instant.ofEpochMilli(birthdayTimestamp)
                                 .atZone(ZoneId.systemDefault())
                                 .toLocalDate();
@@ -307,7 +308,7 @@ public class Damo_Disk2 {
                 .name("Convert to DMP Tags");
 
         // 5. 输出结果
-        dmpTagsStream.print("DMP Tags");
+        //dmpTagsStream.print("DMP Tags");
 
         SingleOutputStreamOperator<String> kafkaPageLogSource = env.fromSource(
                         KafkaUtils.buildKafkaSecureSource(
@@ -383,7 +384,8 @@ public class Damo_Disk2 {
                     public void open(Configuration parameters) {
                         // 初始化状态描述符
                         ValueStateDescriptor<Map<String, String>> descriptor =
-                                new ValueStateDescriptor<>("userTagsState", TypeInformation.of(new TypeHint<Map<String, String>>() {}));
+                                new ValueStateDescriptor<>("userTagsState", TypeInformation.of(new TypeHint<Map<String, String>>() {
+                                }));
                         userTagsState = getRuntimeContext().getState(descriptor);
                     }
 
@@ -398,9 +400,6 @@ public class Damo_Disk2 {
                             result.putAll(behavior);  // 行为数据
                             result.putAll(tags);      // 基础信息
                             out.collect(result);
-                        } else {
-                            // 可以输出未关联的数据或记录日志
-                            System.out.println("No user tags found for uid: " + behavior.getString("uid"));
                         }
                     }
 
