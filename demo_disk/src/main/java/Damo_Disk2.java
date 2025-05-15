@@ -378,8 +378,8 @@ public class Damo_Disk2 {
         mapDeviceAndSearchRateResultDs.print("打分模型");
         // 将数据转换为字符串并上传到kafka中
         SingleOutputStreamOperator<String> log_score = mapDeviceAndSearchRateResultDs.map((MapFunction<JSONObject, String>) JSONAware::toJSONString);
-        KafkaSink<String> damo_disk_three = KafkaUtil.getKafkaProduct(Config.KAFKA_BOOT_SERVER, "damo_disk_three");
-        log_score.sinkTo(damo_disk_three);
+        KafkaSink<String> damo_disk_two = KafkaUtil.getKafkaProduct(Config.KAFKA_BOOT_SERVER, "damo_disk_two");
+        log_score.sinkTo(damo_disk_two);
 
         // user_info处理
         SingleOutputStreamOperator<String> kafkaCdcDb = env.fromSource(
@@ -427,7 +427,12 @@ public class Damo_Disk2 {
         //processDuplicateOrderInfoAndDetailDs.print("processDuplicateOrderInfoAndDetailDs");
 
         SingleOutputStreamOperator<JSONObject> mapOrderInfoAndDetailModelDs = processDuplicateOrderInfoAndDetailDs.map(new MapOrderAndDetailRateModelFunc(dim_base_categories, time_rate_weight_coefficient, amount_rate_weight_coefficient, brand_rate_weight_coefficient, category_rate_weight_coefficient));
-        mapOrderInfoAndDetailModelDs.print("result");
+        mapOrderInfoAndDetailModelDs.print("OrderInfoAndDetail");
+
+        //将数据转换为字符串并上传到kafka中
+        SingleOutputStreamOperator<String> model_ds = mapOrderInfoAndDetailModelDs.map((MapFunction<JSONObject, String>) JSONAware::toJSONString);
+        KafkaSink<String> damo_disk_four = KafkaUtil.getKafkaProduct(Config.KAFKA_BOOT_SERVER, "damo_disk_three");
+        model_ds.sinkTo(damo_disk_four);
 
         env.execute("Optimized User Tags Processing");
     }
