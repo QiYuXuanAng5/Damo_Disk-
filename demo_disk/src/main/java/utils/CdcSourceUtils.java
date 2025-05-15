@@ -8,7 +8,7 @@ import java.util.Properties;
 
 /**
  * @Package com.stream.common.utils.CdcSourceUtils
- * @Author zhou.han
+ * @Author guo.jia.hui
  * @Date 2024/12/17 11:49
  * @description: MySQL Cdc Source
  */
