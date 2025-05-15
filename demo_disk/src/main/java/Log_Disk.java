@@ -6,9 +6,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
-import org.apache.flink.streaming.api.functions.co.ProcessJoinFunction;
-import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
-import org.apache.flink.streaming.api.windowing.time.Time;
+
 import org.apache.flink.util.Collector;
 import utils.Config;
 import utils.KafkaUtil;
@@ -35,7 +33,7 @@ public class Log_Disk {
 
         SingleOutputStreamOperator<JSONObject> Topic_log_json = topic_log.map(new MapFunction<String, JSONObject>() {
             @Override
-            public JSONObject map(String s) throws Exception {
+            public JSONObject map(String s) {
                 return JSONObject.parseObject(s);
             }
         });
@@ -44,7 +42,7 @@ public class Log_Disk {
         DataStreamSource<String> disk = KafkaUtil.getKafkaConsumer(env, Config.KAFKA_BOOT_SERVER, "disk");
         SingleOutputStreamOperator<JSONObject> disk_json = disk.map(new MapFunction<String, JSONObject>() {
             @Override
-            public JSONObject map(String s) throws Exception {
+            public JSONObject map(String s) {
                 return JSON.parseObject(s);
             }
         }).assignTimestampsAndWatermarks(WatermarkStrategy
@@ -54,7 +52,7 @@ public class Log_Disk {
 
         SingleOutputStreamOperator<JSONObject> process = Topic_log_json.process(new ProcessFunction<JSONObject, JSONObject>() {
             @Override
-            public void processElement(JSONObject jsonObject, ProcessFunction<JSONObject, JSONObject>.Context context, Collector<JSONObject> collector) throws Exception {
+            public void processElement(JSONObject jsonObject, ProcessFunction<JSONObject, JSONObject>.Context context, Collector<JSONObject> collector) {
                 JSONObject log_disk = new JSONObject();
                 JSONObject common = jsonObject.getJSONObject("common");
                 String mid = common.getString("mid");
@@ -71,21 +69,6 @@ public class Log_Disk {
                 .<JSONObject>forBoundedOutOfOrderness(Duration.ofSeconds(20))
                 .withTimestampAssigner((event, timestamp) -> event.getLong("ts")));
         process.print("数据处理");
-
-//        SingleOutputStreamOperator<JSONObject> operator = process
-//                .keyBy(json -> json.getString("uid"))
-//                .intervalJoin(disk_json.keyBy(json -> json.getString("uid")))
-//                .between(Time.minutes(-30), Time.minutes(30))
-//                .process(new ProcessJoinFunction<JSONObject, JSONObject, JSONObject>() {
-//
-//                    @Override
-//                    public void processElement(JSONObject left, JSONObject right, ProcessJoinFunction<JSONObject, JSONObject, JSONObject>.Context context, Collector<JSONObject> collector) throws Exception {
-//                        right.putAll(left);
-//                        collector.collect(right);
-//                    }
-//                });
-//        operator.print("interval连接");
-
 
         // 执行 Flink 任务
         env.execute("Log Disk Processing");

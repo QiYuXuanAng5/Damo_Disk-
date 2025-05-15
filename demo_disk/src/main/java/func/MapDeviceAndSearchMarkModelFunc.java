@@ -18,7 +18,7 @@ import java.util.Map;
 
 /**
  * @Package com.retailersv1.func.MapDeviceMarkModel
- * @Author zhou.han
+ * @Author guo.jia.hui
  * @Date 2025/5/13 21:34
  * @description: 设备打分模型
  */
