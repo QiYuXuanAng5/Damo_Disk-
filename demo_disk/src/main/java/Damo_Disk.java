@@ -48,7 +48,7 @@ public class Damo_Disk {
                 String table = jsonObject.getJSONObject("source").getString("table");
                 if (table != null && table.equals("user_info")) {
                     collector.collect(jsonObject.toJSONString());
-                } else {
+                } else if (table != null && table.equals("user_info_sup")){
                     context.output(user_info_sup_msg, jsonObject.toString());
                 }
             }

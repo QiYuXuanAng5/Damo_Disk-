@@ -33,11 +33,11 @@ public class FlinkCDC {
                 .hostname("cdh03")
                 .port(3306)
                 .databaseList("flink_realtime") // set captured database
-                .tableList("flink_realtime.user_info,flink_realtime.user_info_sup_msg") // set captured table
+                .tableList("flink_realtime.*") // set captured table
                 .username("root")
                 .password("root")
                 .deserializer(new JsonDebeziumDeserializationSchema()) // converts SourceRecord to JSON String
-                .startupOptions(StartupOptions.initial())
+                .startupOptions(StartupOptions.earliest())
                 .includeSchemaChanges(true)
                 .debeziumProperties(prop)
                 .build();
