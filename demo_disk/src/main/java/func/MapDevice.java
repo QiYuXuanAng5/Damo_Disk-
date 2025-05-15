@@ -10,7 +10,7 @@ import org.apache.flink.api.common.functions.RichMapFunction;
  * @description: 字段提取
  */
 public class MapDevice extends RichMapFunction<JSONObject, JSONObject> {
-    public JSONObject map(JSONObject jsonObject) throws Exception {
+    public JSONObject map(JSONObject jsonObject) {
         JSONObject result = new JSONObject();
         if (jsonObject.containsKey("common")) {
             JSONObject common = jsonObject.getJSONObject("common");
@@ -31,9 +31,9 @@ public class MapDevice extends RichMapFunction<JSONObject, JSONObject> {
             }
         }
         JSONObject deviceInfo = result.getJSONObject("deviceInfo");
+        // 拆分字符串并取第一部分(Android 10,拆分出可用的字符串)
         String os = deviceInfo.getString("os").split(" ")[0];
         deviceInfo.put("os", os);
-
 
         return result;
     }

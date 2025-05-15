@@ -50,6 +50,8 @@ import java.util.Map;
  * @Date 2025/5/13 8:45
  * @description:
  */
+//.uid()	为算子指定唯一ID，用于状态持久化/恢复
+//.name()	为算子设置可读名称，方便在Web UI/日志中识别
 public class Damo_Disk2 {
     private static final List<DimBaseCategory> dim_base_categories;
 
@@ -291,18 +293,31 @@ public class Damo_Disk2 {
                         int day = date.getDayOfMonth();
 
                         // 星座日期范围定义
-                        if ((month == 12 && day >= 22) || (month == 1 && day <= 19)) return "摩羯座";
-                        else if (month == 1 || month == 2 && day <= 18) return "水瓶座";
-                        else if (month == 2 || month == 3 && day <= 20) return "双鱼座";
-                        else if (month == 3 || month == 4 && day <= 19) return "白羊座";
-                        else if (month == 4 || month == 5 && day <= 20) return "金牛座";
-                        else if (month == 5 || month == 6 && day <= 21) return "双子座";
-                        else if (month == 6 || month == 7 && day <= 22) return "巨蟹座";
-                        else if (month == 7 || month == 8 && day <= 22) return "狮子座";
-                        else if (month == 8 || month == 9 && day <= 22) return "处女座";
-                        else if (month == 9 || month == 10 && day <= 23) return "天秤座";
-                        else if (month == 10 || month == 11 && day <= 22) return "天蝎座";
-                        else return "射手座";
+                        if (month == 1) {
+                            return (day <= 19) ? "摩羯座" : "水瓶座";      // 1月1日-1月19日:摩羯座 | 1月20日-1月31日:水瓶座
+                        } else if (month == 2) {
+                            return (day <= 18) ? "水瓶座" : "双鱼座";      // 2月1日-2月18日:水瓶座 | 2月19日-2月29日:双鱼座
+                        } else if (month == 3) {
+                            return (day <= 20) ? "双鱼座" : "白羊座";      // 3月1日-3月20日:双鱼座 | 3月21日-3月31日:白羊座
+                        } else if (month == 4) {
+                            return (day <= 19) ? "白羊座" : "金牛座";      // 4月1日-4月19日:白羊座 | 4月20日-4月30日:金牛座
+                        } else if (month == 5) {
+                            return (day <= 20) ? "金牛座" : "双子座";      // 5月1日-5月20日:金牛座 | 5月21日-5月31日:双子座
+                        } else if (month == 6) {
+                            return (day <= 21) ? "双子座" : "巨蟹座";      // 6月1日-6月21日:双子座 | 6月22日-6月30日:巨蟹座
+                        } else if (month == 7) {
+                            return (day <= 22) ? "巨蟹座" : "狮子座";      // 7月1日-7月22日:巨蟹座 | 7月23日-7月31日:狮子座
+                        } else if (month == 8) {
+                            return (day <= 22) ? "狮子座" : "处女座";      // 8月1日-8月22日:狮子座 | 8月23日-8月31日:处女座
+                        } else if (month == 9) {
+                            return (day <= 22) ? "处女座" : "天秤座";      // 9月1日-9月22日:处女座 | 9月23日-9月30日:天秤座
+                        } else if (month == 10) {
+                            return (day <= 23) ? "天秤座" : "天蝎座";      // 10月1日-10月23日:天秤座 | 10月24日-10月31日:天蝎座
+                        } else if (month == 11) {
+                            return (day <= 22) ? "天蝎座" : "射手座";      // 11月1日-11月22日:天蝎座 | 11月23日-11月30日:射手座
+                        } else {
+                            return (day <= 21) ? "射手座" : "摩羯座";      // 12月1日-12月21日:射手座 | 12月22日-12月31日:摩羯座
+                        }
                     }
                 })
                 .name("Convert to DMP Tags");
