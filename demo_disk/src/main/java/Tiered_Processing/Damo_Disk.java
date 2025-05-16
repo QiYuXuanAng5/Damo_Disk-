@@ -1,82 +1,38 @@
-import bean.DimBaseCategory;
+package Tiered_Processing;
+
 import bean.UserInfo;
 import bean.UserInfoSup;
 import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONAware;
 import com.alibaba.fastjson.JSONObject;
-import func.*;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.java.tuple.Tuple2;
-
-import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.datastream.KeyedStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.streaming.api.functions.co.ProcessJoinFunction;
-import org.apache.flink.streaming.api.windowing.assigners.TumblingProcessingTimeWindows;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.util.Collector;
 
-import utils.*;
-
-import java.sql.Connection;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.Date;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
- * @Package utils.Damo_Disk2
+ * @Package Tiered_Processing.Damo_Disk
  * @Author guo.jia.hui
- * @Date 2025/5/13 8:45
+ * @Date 2025/5/15 22:24
  * @description:
  */
-//.uid()	为算子指定唯一ID，用于状态持久化/恢复
-//.name()	为算子设置可读名称，方便在Web UI/日志中识别
-public class Damo_Disk2 {
-    private static final List<DimBaseCategory> dim_base_categories;
-
-    private static final Connection connection;
-
-    private static final double device_rate_weight_coefficient = 0.1; // 设备权重系数
-    private static final double search_rate_weight_coefficient = 0.15; // 搜索权重系数
-    private static final double time_rate_weight_coefficient = 0.1;    // 时间权重系数
-    private static final double amount_rate_weight_coefficient = 0.15;    // 价格权重系数
-    private static final double brand_rate_weight_coefficient = 0.2;    // 品牌权重系数
-    private static final double category_rate_weight_coefficient = 0.3; // 类目权重系数
-
-    static {
-        try {
-            connection = JdbcUtils.getMySQLConnection(
-                    "jdbc:mysql://cdh03:3306/flink_realtime",
-                    "root",
-                    "root");
-            String sql = "select b3.id,                          \n" +
-                    "            b3.name as b3name,              \n" +
-                    "            b2.name as b2name,              \n" +
-                    "            b1.name as b1name               \n" +
-                    "     from flink_realtime.base_category3 as b3  \n" +
-                    "     join flink_realtime.base_category2 as b2  \n" +
-                    "     on b3.category2_id = b2.id             \n" +
-                    "     join flink_realtime.base_category1 as b1  \n" +
-                    "     on b2.category1_id = b1.id";
-            dim_base_categories = JdbcUtils.queryList2(connection, sql, DimBaseCategory.class, false);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
+public class Damo_Disk {
     public static void main(String[] args) throws Exception {
         // 1. 创建 Flink 执行环境
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -326,116 +282,8 @@ public class Damo_Disk2 {
                 .name("Convert to DMP Tags");
 
         // 5. 输出结果
-        dmpTagsStream.print("DMP Tags");
-        // 6.将数据保存到kafka中
-        KafkaSink<String> damo_disk_one = KafkaUtil.getKafkaProduct(Config.KAFKA_BOOT_SERVER, "damo_disk_one");
-        dmpTagsStream.map((MapFunction<Map<String, String>, String>) Object::toString).sinkTo(damo_disk_one);
+        //dmpTagsStream.print("DMP Tags");
 
-        SingleOutputStreamOperator<String> kafkaPageLogSource = env.fromSource(
-                        KafkaUtils.buildKafkaSecureSource(
-                                "cdh01:9092",
-                                "topic_log",
-                                new Date().toString(),
-                                OffsetsInitializer.earliest()
-                        ),
-                        WatermarkUtil.WatermarkStrategy(),
-                        "kafka_page_log_source"
-                ).uid("kafka_page_log")
-                .name("kafka_page_log");
-
-        SingleOutputStreamOperator<JSONObject> dataPageLogConvertJsonDs = kafkaPageLogSource.map(JSON::parseObject)
-                .uid("convert_json_page_log")
-                .name("convert_json_page_log");
-        //dataPageLogConvertJsonDs.print("dataPageLogConvertJsonDs");
-
-        // 设备信息 + 关键词搜索
-        SingleOutputStreamOperator<JSONObject> logDeviceInfoDs = dataPageLogConvertJsonDs.map(new MapDevice())
-                .uid("get device_info & search")
-                .name("get device_info & search");
-        //logDeviceInfoDs.print("设备信息 + 关键词搜索");
-
-        //对数据进行逻辑分区
-        SingleOutputStreamOperator<JSONObject> filterNotNullUidLogPageMsg = logDeviceInfoDs.filter(data -> !data.getString("uid").isEmpty());
-        KeyedStream<JSONObject, String> keyedStreamLogPageMsg = filterNotNullUidLogPageMsg.keyBy(data -> data.getString("uid"));
-        //keyedStreamLogPageMsg.print("逻辑分区");
-
-
-        SingleOutputStreamOperator<JSONObject> processStagePageLogDs = keyedStreamLogPageMsg.process(new ProcessFilterRepeatTsDataFunc());
-        //processStagePageLogDs.print("状态去重");
-
-        // 2 min 分钟窗口
-        SingleOutputStreamOperator<JSONObject> win2MinutesPageLogsDs = processStagePageLogDs.keyBy(data -> data.getString("uid"))
-                .process(new AggregateUserDataProcessFunction())
-                .keyBy(data -> data.getString("uid"))
-                .window(TumblingProcessingTimeWindows.of(Time.minutes(2)))
-                .reduce((value1, value2) -> value2)
-                .uid("win 2 minutes page count msg")
-                .name("win 2 minutes page count msg");
-        //win2MinutesPageLogsDs.print("2 min 分钟窗口");
-
-        // 设置打分模型
-        SingleOutputStreamOperator<JSONObject> mapDeviceAndSearchRateResultDs = win2MinutesPageLogsDs.map(new MapDeviceAndSearchMarkModelFunc(dim_base_categories, device_rate_weight_coefficient, search_rate_weight_coefficient));
-        mapDeviceAndSearchRateResultDs.print("打分模型");
-        // 将数据转换为字符串并上传到kafka中
-        SingleOutputStreamOperator<String> log_score = mapDeviceAndSearchRateResultDs.map((MapFunction<JSONObject, String>) JSONAware::toJSONString);
-        KafkaSink<String> damo_disk_two = KafkaUtil.getKafkaProduct(Config.KAFKA_BOOT_SERVER, "damo_disk_two");
-        log_score.sinkTo(damo_disk_two);
-
-        // user_info处理
-        SingleOutputStreamOperator<String> kafkaCdcDb = env.fromSource(
-                KafkaUtils.buildKafkaSecureSource(
-                        Config.KAFKA_BOOT_SERVER,
-                        "disk_data",
-                        new Date().toString(),
-                        OffsetsInitializer.earliest()
-                ),
-                WatermarkUtil.WatermarkStrategy(),
-                "kafka_cdc_db_source"
-        ).uid("kafka_cdc_db_source").name("kafka_cdc_db_source");
-
-        //将数据转换为JSON对象
-        SingleOutputStreamOperator<JSONObject> dataConvertJsonDs = kafkaCdcDb.map(JSON::parseObject)
-                .uid("convert json cdc db")
-                .name("convert json cdc db");
-        //dataConvertJsonDs.print();
-
-        SingleOutputStreamOperator<JSONObject> cdcOrderInfoDs = dataConvertJsonDs.filter(data -> data.getJSONObject("source").getString("table").equals("order_info"))
-                .uid("filter kafka order info")
-                .name("filter kafka order info");
-        SingleOutputStreamOperator<JSONObject> cdcOrderDetailDs = dataConvertJsonDs.filter(data -> data.getJSONObject("source").getString("table").equals("order_detail"))
-                .uid("filter kafka order detail")
-                .name("filter kafka order detail");
-
-        //cdcOrderInfoDs.print("order_info");
-        SingleOutputStreamOperator<JSONObject> mapCdcOrderInfoDs = cdcOrderInfoDs.map(new MapOrderInfoDataFunc()).filter(obj -> !obj.isEmpty());
-        //mapCdcOrderInfoDs.print("mapCdcOrderInfoDs");
-        SingleOutputStreamOperator<JSONObject> mapCdcOrderDetailDs = cdcOrderDetailDs.map(new MapOrderDetailFunc()).filter(obj -> !obj.isEmpty());
-
-        SingleOutputStreamOperator<JSONObject> filterNotNullCdcOrderInfoDs = mapCdcOrderInfoDs.filter(data -> data.getString("id") != null && !data.getString("id").isEmpty());
-        SingleOutputStreamOperator<JSONObject> filterNotNullCdcOrderDetailDs = mapCdcOrderDetailDs.filter(data -> data.getString("order_id") != null && !data.getString("order_id").isEmpty());
-
-        KeyedStream<JSONObject, String> keyedStreamCdcOrderInfoDs = filterNotNullCdcOrderInfoDs.keyBy(data -> data.getString("id"));
-        KeyedStream<JSONObject, String> keyedStreamCdcOrderDetailDs = filterNotNullCdcOrderDetailDs.keyBy(data -> data.getString("order_id"));
-
-        SingleOutputStreamOperator<JSONObject> processIntervalJoinOrderInfoAndDetailDs = keyedStreamCdcOrderInfoDs.intervalJoin(keyedStreamCdcOrderDetailDs)
-                .between(Time.minutes(-2), Time.minutes(2))
-                .process(new IntervalDbOrderInfoJoinOrderDetailProcessFunc());
-        //processIntervalJoinOrderInfoAndDetailDs.print("processIntervalJoinOrderInfoAndDetailDs");
-
-        SingleOutputStreamOperator<JSONObject> processDuplicateOrderInfoAndDetailDs = processIntervalJoinOrderInfoAndDetailDs.keyBy(data -> data.getString("detail_id"))
-                .process(new processOrderInfoAndDetailFunc());
-        //processDuplicateOrderInfoAndDetailDs.print("processDuplicateOrderInfoAndDetailDs");
-
-        SingleOutputStreamOperator<JSONObject> mapOrderInfoAndDetailModelDs = processDuplicateOrderInfoAndDetailDs.map(new MapOrderAndDetailRateModelFunc(dim_base_categories, time_rate_weight_coefficient, amount_rate_weight_coefficient, brand_rate_weight_coefficient, category_rate_weight_coefficient));
-        mapOrderInfoAndDetailModelDs.print("OrderInfoAndDetail");
-
-        //将数据转换为字符串并上传到kafka中
-        //        SingleOutputStreamOperator<String> model_ds = mapOrderInfoAndDetailModelDs.map((MapFunction<JSONObject, String>) JSONAware::toJSONString);
-        //        KafkaSink<String> damo_disk_four = KafkaUtil.getKafkaProduct(Config.KAFKA_BOOT_SERVER, "damo_disk_three");
-        //        model_ds.sinkTo(damo_disk_four);
-
-
-
-        env.execute("Optimized User Tags Processing");
+        env.execute();
     }
 }
